@@ -22,21 +22,71 @@ pub enum Cell {
     Output(OutputCell),
 }
 
-// Factory that build cells from signed_notes.
+//Factory that build cells from signed_notes.
+#[derive(Debug, Serialize, Deserialize)]
+pub enum CellFactory {
+    Code(SignedNote),
+    Output(SignedNote),
+}
 
-// pub enum Cell {
-    // Code(SignedNote) = 300,
-    // Output(SignedNote) = 301,
-// }
-// impl Cell {
-    // pub fn identify_note_type(s: SignedNote) -> Self {
-        // match s.get_kind() {
-            // 300 => Cell::Code(CodeCell::new(s)),
-            // 301 => Cell::Output(OutputCell::new(s)),
-            // _ => panic!("Invalid Note Type"),
-        // }
-    // }
-// }
+impl CellFactory {
+    pub fn identify_note_type(s: SignedNote) -> Self {
+        match s.get_kind() {
+            300 => CellFactory::Code(s),
+            301 => CellFactory::Output(s),
+            _ => panic!("Invalid Note Type"),
+        }
+    }
+    pub fn execute(self) {
+        match self {
+            CellFactory::Code(s) => {
+                let codecell = Code::new(s);
+                tokio::spawn(async move {
+                     codecell.run().await;
+                });
+            }
+            CellFactory::Output(s) => {
+                let output_cell: OutputCell = serde_json::from_str(
+                    s.get_content()
+                ).unwrap();
+                println!(
+                    "Output Cell: {:?}",
+                    to_string_pretty(&output_cell).unwrap()
+                );
+            }
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Code {
+    signed_note: SignedNote,
+}
+
+impl Code {
+    pub fn new(s: SignedNote) -> Self {
+        Code { signed_note: s }
+    }
+    pub async fn run(self) {
+        // we will take the &self.signed_note, and create an output cell. The output_cell
+        // should have the stdout with kind 301 ready to be sent to the relay.
+        // The structure of the new cell can be made by 
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Output{
+    signed_note: SignedNote,
+}
+
+impl Output {
+    pub fn new(s: SignedNote) -> Self {
+        Output { signed_note: s }
+    }
+    pub fn hello_world(&self) {
+        println!("Hello World!");
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CodeCell {
@@ -58,7 +108,9 @@ impl CodeCell {
         json_string.to_string()
     }
     pub fn create_code_note(self) -> SignedNote {
-        let file_path = retrieve_pem_file_path().unwrap();
+        let file_path = retrieve_pem_file_path(
+            "private-diego-stash.pem".to_string()
+        ).unwrap();
         let user_key_pair = LocalKeyManagerOpenssl::new(file_path);
         let mut note = Note::new(
             user_key_pair.get_public_key(),
@@ -88,6 +140,7 @@ impl CodeCell {
         }
     }
     pub async fn create_output_request(self) {
+        println!("Create Output Request {}", to_string_pretty(&self).unwrap());
         let signed_code_note = self.create_code_note();
         let current_cell: CodeCell = serde_json::from_str(
             &signed_code_note.get_content()
@@ -123,7 +176,9 @@ impl OutputCell {
         json_string.to_string()
     }
     pub fn create_output_note(self) -> SignedNote {
-        let file_path = retrieve_pem_file_path().unwrap();
+        let file_path = retrieve_pem_file_path(
+            "private-diego-stash.pem".to_string()
+        ).unwrap();
         let user_key_pair = LocalKeyManagerOpenssl::new(file_path);
         let mut note = Note::new(
             user_key_pair.get_public_key(),
@@ -131,7 +186,7 @@ impl OutputCell {
             &self.create_output_content(),
         );
         note.tag_note("l", "rust");
-        note.tag_note("i", "0:cellId", "1:cellId", "2:cellId");
+        note.tag_note("i", "0:cellId");
         note.tag_note("a", "activeCellID");
         let signed_note = user_key_pair.sign_nostr_event(note);
         signed_note

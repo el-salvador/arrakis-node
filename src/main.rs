@@ -6,28 +6,48 @@ mod utils;
 mod cell;
 mod local_key_manager_openssl;
 mod run_rust;
-use crate::cell::{Cell};
+use crate::cell::{Cell, CellFactory};
 use crate::utils::{
     unix_stamp_from_the_beginning_of_today,
     append_key_value_to_json_string
 };
 use std::env;
 use tokio::time::{sleep, Duration};
+use crate::local_key_manager_openssl::LocalKeyManagerOpenssl;
+use crate::utils::retrieve_pem_file_path;
 
+// I would like to create a code cell that looks like
+// {
+  // "id": "1234567890abcdef1234567890abcdef12345678",
+  // "pubkey": "01234567890abcdef1234567890abcdef12345678",
+  // "created_at": 1661040000,
+  // "kind": 402,
+  // "tags": [
+    // ["i", "#1"],
+    // ["N", "pubkeyOfNotebook"]
+  // ],
+  // "content": "This is a signed Nostr note.",
+  // "sig": "01234567890abcdef1234567890abcdef1234567801234567890abcdef1234567890abcdef12345678"
+// }
 async fn create_code_cells(){
     sleep(Duration::from_secs(5)).await;
-    let code_cell_example: Cell = serde_json::from_str(
-        r#"{
-          "cell_type":"Code",
-          "source":["println!(\"Hello World!\");"],
-          "language":"rust"
-      }"#
-    ).unwrap();
-    //
-    match code_cell_example {
-        Cell::Code(code_cell) => code_cell.run().await,
-        _ => panic!("Not a code cell")
-    };
+    let notebook_pem_file_path = retrieve_pem_file_path("notebook.pem".to_string()).unwrap();
+    let notebook_key_pair = LocalKeyManagerOpenssl::new(notebook_pem_file_path);
+    let user_pem_file_path = retrieve_pem_file_path("private-diego-stash.pem".to_string()).unwrap();
+    let user_key_pair = LocalKeyManagerOpenssl::new(user_pem_file_path);
+    let content_string: String = json!({
+        "source":"println!(\"Hello World\")"
+    }).to_string();
+    let mut note = Note::new(
+        user_key_pair.get_public_key(),
+        300,
+        &content_string
+    );
+    note.tag_note("i", "#1");
+    note.tag_note("N", &notebook_key_pair.get_public_key());
+    let signed_note = user_key_pair.sign_nostr_event(note);
+    let cell: CellFactory = CellFactory::identify_note_type(signed_note);
+    cell.execute();
 }
 
 async fn listen_to_relay(){
@@ -77,8 +97,44 @@ async fn listen_to_relay(){
 
 }
 
+async fn create_from_signed_note() {
+    let url = env::var("URL").unwrap_or("ws://localhost:7001".to_string());
+    if let Ok(relay) = NostrRelay::new(&url).await {
+    let filter: Value = json!({
+        "kinds":[300,301],
+        "since": unix_stamp_from_the_beginning_of_today(),
+        "limit": 100,
+    });
+    relay.subscribe(filter).await.expect("Could not subscribe");
+    while let Some(Ok(message)) = relay.read_from_relay().await {
+            match message {
+                RelayEvents::EVENT(_event,_id, signed_note) => {
+                    println!(
+                        "Received event: {}",
+                        to_string_pretty(&signed_note).unwrap()
+                    );
+                    let cell: CellFactory = CellFactory::identify_note_type(
+                        signed_note
+                    );
+                    cell.execute();
+
+                },
+                RelayEvents::OK(_event, id, success, _msg) =>{
+                    println!("Received Ok: {} {} {}", id, success, _msg);
+                },
+                _ => {
+                    println!("Received something else");
+                }
+            }
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(),String> {
-    let _ = tokio::join!(create_code_cells(), listen_to_relay());
+    let _ = tokio::join!(
+        create_code_cells(),
+        create_from_signed_note()
+    );
     Ok(())
 }

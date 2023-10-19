@@ -1,13 +1,14 @@
 use chrono::prelude::Utc;
 use serde_json::Value;
 use std::env;
-// I want to write a function that will retrieve the
-// private key from the microservice's directory.
-// I want to make sure that this private key is not retrievalble by anyone
-// other than the microservice.
-pub fn retrieve_pem_file_path() -> Result<String, Box<dyn std::error::Error>> {
-    let pem_file = env::var("PEM_PATH").unwrap_or(format!("{}", "private-diego-stash.pem"));
-    let file_path = format!("./{}", pem_file);
+
+// the retrieve_pem_file_path function should take a parameter
+// that is the name of the file that contains the pem file path
+pub fn retrieve_pem_file_path(name: String) -> Result<String, Box<dyn std::error::Error>> {
+    let pem_file = env::var("PEM_FILE").unwrap_or(name);
+
+    // let pem_file = env::var("PEM_PATH").unwrap_or(format!("{}", "private-diego-stash.pem"));
+    let file_path = format!("{}", pem_file);
     Ok(file_path)
 }
 
