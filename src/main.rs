@@ -17,10 +17,12 @@ use crate::local_key_manager_openssl::LocalKeyManagerOpenssl;
 use crate::utils::retrieve_pem_file_path;
 
 fn create_code_content() -> String {
-    let json_string = json!({
-        "source": ["println!(\"Hello World!\");"]
-    });
-    json_string.to_string()
+    // let json_string = json!({
+        // "source": ["println!(\"Hello World!\");"]
+    // });
+    // json_string.to_string()
+    let source: String = String::from("fn main(){\tprintln!(\"Hello World!\");\t}");
+    source
 
 }
 async fn create_code_cells(){
@@ -34,7 +36,7 @@ async fn create_code_cells(){
         300,
         &create_code_content()
     );
-    note.tag_note("i", "#1");
+    note.tag_note("l", "rust");
     note.tag_note("N", &notebook_key_pair.get_public_key());
     let signed_note = user_key_pair.sign_nostr_event(note);
     let cell: CellFactory = CellFactory::identify_note_type(signed_note);
@@ -48,6 +50,7 @@ async fn create_from_signed_note() {
         "kinds":[300,301],
         "since": unix_stamp_from_the_beginning_of_today(),
         "limit": 100,
+        "l":"rust"
     });
     relay.subscribe(filter).await.expect("Could not subscribe");
     while let Some(Ok(message)) = relay.read_from_relay().await {

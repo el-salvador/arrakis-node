@@ -96,15 +96,26 @@ impl Code {
         let signed_note = user_key_pair.sign_nostr_event(note);
         signed_note
     }
+    pub fn create_vector_by_splitting_from_regex(&self, s: &str) -> Vec<String> {    
+        // The regex shoul split the string into a vector
+        // everytime it sees "/t" or "/n"
+        let regex = r"[\t]";
+        let mut v: Vec<String> = Vec::new();
+        for s in s.split(regex) {
+            v.push(s.to_string());
+        }
+        v
+
+    }
     pub fn run(self) -> SignedNote {
         // we will take the &self.signed_note, and create an output cell. The output_cell
         // should have the stdout with kind 301 ready to be sent to the relay.
         // The structure of the new cell can be made by 
-        let code_content: CodeContent = serde_json::from_str(
+        let code_content_vector:Vec<String> = self.create_vector_by_splitting_from_regex(
             self.signed_note.get_content()
-        ).unwrap();
+        );
         let stdout = create_rust_file_compile_and_run(
-            code_content.get_source()
+            code_content_vector
         );
         let signed_note = self.create_output_note(stdout.unwrap());
         signed_note
