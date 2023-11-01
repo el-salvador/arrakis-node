@@ -40,7 +40,7 @@ impl CellFactory {
                 let codecell = Code::new(s);
                 tokio::spawn(async move {
                     let signed_note: SignedNote = codecell.run();
-                    let url = var("URL").unwrap_or("ws://localhost:7001".to_string());
+                    let url = var("RELAY").unwrap_or("ws://localhost:7001".to_string());
                     if let Ok(relay) = NostrRelay::new(&url).await {
                         relay.send_note(signed_note).await.expect("Failed to send note");
                     }
@@ -98,7 +98,7 @@ impl Code {
     }
     pub fn create_vector_by_splitting_from_regex(&self, s: &str) -> Vec<String> {    
         // The regex shoul split the string into a vector
-        // everytime it sees "/t" or "/n"
+        // everytime it sees "\t" or "\n"
         let regex = r"[\t]";
         let mut v: Vec<String> = Vec::new();
         for s in s.split(regex) {

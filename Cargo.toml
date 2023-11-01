@@ -11,7 +11,7 @@ tokio = { version = "1.28.0", features = ["full"] }
 url = "2.3.1"
 futures-util = { version = "0.3.28", default-features = false, features = ["sink", "std"] }
 rand = { version = "0.8.4", features = ["std"] }
-secp256k1 = {version="0.27.0", features=["global-context"]}
+secp256k1 = { version = "0.27.0", features = ["global-context"] }
 hex = "0.4.3"
 serde_json = "1.0.96"
 serde = { version = "1.0", features = ["derive"] }
@@ -24,7 +24,7 @@ http = "0.2.9"
 sha1 = "0.10.5"
 getrandom = { version = "0.2", default-features = false, features = ["js"] }
 futures-channel = "0.3.28"
-nostro2 = "0.1.6"
+nostro2 = "0.1.7"
 log = "0.4.20"
 env_logger = "0.10.0"
 ed25519-dalek ={version = "2.0.0", features = ["pem","pkcs8","rand_core"]}

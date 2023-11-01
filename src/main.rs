@@ -17,11 +17,9 @@ use crate::local_key_manager_openssl::LocalKeyManagerOpenssl;
 use crate::utils::retrieve_pem_file_path;
 
 fn create_code_content() -> String {
-    // let json_string = json!({
-        // "source": ["println!(\"Hello World!\");"]
-    // });
-    // json_string.to_string()
-    let source: String = String::from("fn main(){\tprintln!(\"Hello World!\");\t}");
+    let source: String = String::from(
+        "fn main(){\tprintln!(\"Hello World!\");\t}"
+    );
     source
 
 }
@@ -44,7 +42,7 @@ async fn create_code_cells(){
 }
 
 async fn create_from_signed_note() {
-    let url = env::var("URL").unwrap_or("ws://localhost:7001".to_string());
+    let url = env::var("RELAY").unwrap_or("ws://localhost:7001".to_string());
     if let Ok(relay) = NostrRelay::new(&url).await {
     let filter: Value = json!({
         "kinds":[300,301],
