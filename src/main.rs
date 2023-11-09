@@ -17,8 +17,18 @@ use crate::local_key_manager_openssl::LocalKeyManagerOpenssl;
 use crate::utils::retrieve_pem_file_path;
 
 fn create_code_content() -> String {
+    // send a rust string that retrieves returns all pid processes into a println
     let source: String = String::from(
-        "fn main(){\tprintln!(\"Hello World!\");\t}"
+        r#"
+        use std::process::Command;
+        let output = Command::new("ps")
+            .arg("aux")
+            .output()
+            .expect("failed to execute process");
+        println!("status: {}", output.status);
+        println!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+        println!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+        "#
     );
     source
 
