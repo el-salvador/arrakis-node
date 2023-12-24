@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::{local_key_handler::LocalKeyManagerOpenssl, rust_handler::RustCodeNote};
 
-pub fn unix_stamp_from_the_beginning_of_today() -> u64 {
+pub fn unix_stamp_utc_now() -> u64 {
     let now = Utc::now();
     now.timestamp() as u64
 }

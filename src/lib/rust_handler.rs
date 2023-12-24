@@ -127,7 +127,7 @@ impl CodeNote for RustCodeNote {
         }
 
         let code = signed_note.get_content().to_string();
-        let notebook = signed_note.get_tags_by_id("N").first().unwrap().to_string();
+        let notebook = signed_note.get_tags_by_id("N").first().unwrap_or(&"none".to_string()).to_string();
         let user = signed_note.get_pubkey().to_string();
         Ok(RustCodeNote {
             code,
