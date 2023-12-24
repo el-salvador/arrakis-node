@@ -4,7 +4,7 @@ use nostro2::notes::{Note, SignedNote};
 use nostro2::userkeys::UserKeys;
 use openssl::ec::EcKey;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum KeyManagerError {
     KeyNotFound,
     KeyNotValid,
