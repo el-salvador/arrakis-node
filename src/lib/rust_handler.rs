@@ -8,7 +8,6 @@ use tokio::{
     io::AsyncWriteExt,
     process::Command,
 };
-use tokio::time::{sleep, Duration};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct RustCodeNote {
@@ -73,7 +72,6 @@ impl RustCodeNote {
     }
 
     async fn run_script_file(&mut self) {
-        sleep(Duration::from_secs(4)).await;
         match Command::new("rust-script")
             .arg(format!("/tmp/{}/main.rs", self.user))
             .output()
@@ -99,10 +97,6 @@ impl RustCodeNote {
 #[async_trait]
 impl CodeNote for RustCodeNote {
     fn from_signed_note(signed_note: &SignedNote) -> Result<Self, String> {
-        if signed_note.verify_signature() == false || signed_note.verify_content() == false {
-            return Err("Verification failed".to_string());
-        }
-
         let code = signed_note.get_content().to_string();
         let user = signed_note.get_pubkey().to_string();
         let input_note = signed_note.get_id().to_string();
@@ -138,3 +132,54 @@ impl CodeNote for RustCodeNote {
         signed_note
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_handler_from_note() {
+        let key_manager = LocalKeyManagerOpenssl::new_from_pem("node_key.pem".to_string()).unwrap();
+        let mut note = Note::new(
+            key_manager.get_public_key(),
+            100,
+            "println!(\"Hello, world!\");",
+        );
+        note.tag_note(
+            "l",
+            "rust",
+        );
+        let signed_note = key_manager.sign_nostr_event(note);
+        let mut rust_handler = RustCodeNote::from_signed_note(&signed_note).unwrap();
+        assert_eq!(rust_handler.code, "println!(\"Hello, world!\");");
+        assert_eq!(rust_handler.user, key_manager.get_public_key());
+        rust_handler.create_vector_by_splitting_from_regex();
+        rust_handler.remove_comments();
+        rust_handler.ensure_main_function();
+        assert_eq!(
+            rust_handler.code,
+            "fn main() { println!(\"Hello, world!\"); }"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execution() {
+        let key_manager = LocalKeyManagerOpenssl::new_from_pem("node_key.pem".to_string()).unwrap();
+        let mut note = Note::new(
+            key_manager.get_public_key(),
+            100,
+            "println!(\"Hello, world!\");",
+        );
+        note.tag_note(
+            "l",
+            "rust",
+        );
+        let signed_note = key_manager.sign_nostr_event(note);
+        let rust_handler = RustCodeNote::from_signed_note(&signed_note).unwrap();
+        let output_note = rust_handler.run().await.create_output_note(key_manager);
+        assert_eq!(output_note.verify_signature(), true);
+        assert_eq!(output_note.verify_content(), true);
+        assert_eq!(output_note.get_content(), "Hello, world!\n");
+    }
+}
+

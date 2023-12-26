@@ -1,143 +1,63 @@
-use arrakis_node::consts::{DEFAULT_RELAY_URL, NODE_PEM, NOTEBOOK_PEM, USER_PEM};
+use arrakis_node::consts::{DEFAULT_RELAY_URL, NODE_PEM};
 use arrakis_node::local_key_handler::LocalKeyManagerOpenssl;
-use arrakis_node::utils::{unix_stamp_utc_now, CodeLanguage, CodeNote};
-use nostro2::notes::Note;
+use arrakis_node::utils::{unix_stamp_utc_now, CodeLanguage, HandlerErrors};
 use nostro2::relays::{NostrRelay, RelayEvents};
-use serde_json::{json, to_string_pretty, Value};
+use serde_json::{json, Value};
 use std::env;
 use std::sync::Arc;
-use tokio::sync::Mutex;
-use tokio::time::{sleep, Duration};
 use tracing::{error, info};
 
-fn create_code_content() -> String {
-    // send a rust string that retrieves returns all pid processes into a info
-    let source: String = String::from(
-        r#"
-        use std::process::Command;
-        let output = Command::new("whoami")
-            .output()
-            .expect("failed to execute process");
-        println!("status: {}", output.status);
-        println!("stdout: {}", String::from_utf8_lossy(&output.stdout));
-        println!("stderr: {}", String::from_utf8_lossy(&output.stderr));
-        "#,
-    );
-    source
-}
+#[tokio::main]
+async fn main() {
+    tracing_subscriber::fmt::init();
 
-fn create_python_script_content() -> String {
-    // Create a Rust string that contains a basic Python script
-    let source: String = String::from(
-        r#"
-
-def greet(name):
-        if name:
-              return "Hello, " + name + "!"
-        else:
-              return "Hello, World!"
-
-names = ["Alice", "Bob", "", "Charlie"]
-
-for name in names:
-    greeting = greet(name)
-    print(greeting)
-        "#,
-    );
-    source
-}
-
-async fn create_code_cells() {
-    sleep(Duration::from_secs(2)).await;
-    let notebook_key_pair = LocalKeyManagerOpenssl::new_from_pem(NOTEBOOK_PEM.to_string());
-    let user_key_pair = LocalKeyManagerOpenssl::new_from_pem(USER_PEM.to_string());
-
-    if let Ok(notebook_key_pair) = notebook_key_pair {
-        if let Ok(user_key_pair) = user_key_pair {
-            let mut rust_note =
-                Note::new(user_key_pair.get_public_key(), 300, &create_code_content());
-            rust_note.tag_note("l", "rust");
-            rust_note.tag_note("N", &notebook_key_pair.get_public_key());
-            let rust_signed_note = user_key_pair.sign_nostr_event(rust_note);
-            let mut python_note = Note::new(
-                user_key_pair.get_public_key(),
-                300,
-                &create_python_script_content(),
-            );
-            python_note.tag_note("l", "python");
-            python_note.tag_note("N", &notebook_key_pair.get_public_key());
-            let python_signed_note = user_key_pair.sign_nostr_event(python_note);
-            let url = env::var("RELAY").unwrap_or(DEFAULT_RELAY_URL.to_string());
-            if let Ok(relay) = NostrRelay::new(&url).await {
-                relay
-                    .send_note(rust_signed_note)
-                    .await
-                    .expect("Failed to send note");
-                relay
-                    .send_note(python_signed_note)
-                    .await
-                    .expect("Failed to send note");
-                info!("Sent code notes");
-            }
+    let relay_task = tokio::spawn(async move {
+        let relay = env::var("RELAY").unwrap_or(DEFAULT_RELAY_URL.to_string());
+        if let Err(e) = relay_connection(&relay).await {
+            error!("Relay connection failed: {}", e);
         }
-    }
+    });
+
+    let _ = tokio::join!(relay_task);
 }
 
-#[derive(Debug)]
-enum HandlerErrors {
-    NoRelay(String),
-    NoNodeKeyPair(String),
-}
+async fn relay_connection(relay_url: &str) -> Result<(), HandlerErrors> {
+    let relay = Arc::new(
+        NostrRelay::new(relay_url)
+            .await
+            .map_err(|_| HandlerErrors::RelayError("Could not create relay".to_string()))?,
+    );
 
-impl std::fmt::Display for HandlerErrors {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            HandlerErrors::NoRelay(msg) => write!(f, "{}", msg),
-            HandlerErrors::NoNodeKeyPair(msg) => write!(f, "{}", msg),
-        }
-    }
-}
-
-async fn code_notes_handler() -> Result<(), HandlerErrors> {
-    let url = env::var("RELAY").unwrap_or(DEFAULT_RELAY_URL.to_string());
-
-    let relay = NostrRelay::new(&url)
-        .await
-        .map_err(|_| HandlerErrors::NoRelay("Could not create relay".to_string()))?;
-    let relay = Arc::new(Mutex::new(relay)); // Wrap in Arc and Mutex
-
-    let rust_filter: Value = json!({
+    let code_note_filter: Value = json!({
         "kinds":[300],
         "since": unix_stamp_utc_now(),
         "#l": ["rust", "python"]
     });
 
     relay
-        .lock()
+        .subscribe(code_note_filter)
         .await
-        .subscribe(rust_filter)
-        .await
-        .expect("Could not subscribe");
+        .map_err(|_| HandlerErrors::RelayError("Could not subscribe to relay".to_string()))?;
 
-    while let Some(Ok(message)) = relay.lock().await.read_from_relay().await {
+    while let Some(Ok(message)) = relay.read_from_relay().await {
         match message {
             RelayEvents::EVENT(_event, _id, signed_note) => {
-                info!(
-                    "Received event: {}",
-                    to_string_pretty(&signed_note).unwrap()
-                );
-                let relay_clone = relay.clone();
+                info!("Node event:");
+                let relay_clone = Arc::clone(&relay);
                 tokio::spawn(async move {
                     let node_key_pair = LocalKeyManagerOpenssl::new_from_pem(NODE_PEM.to_string())
                         .map_err(|_| {
-                            HandlerErrors::NoNodeKeyPair(
+                            HandlerErrors::KeyPairError(
                                 "Could not create node key pair".to_string(),
                             )
                         });
                     let output_note =
-                        CodeLanguage::identify_and_execute(&signed_note, node_key_pair.unwrap()).await;
-                    info!("Output note: {}", to_string_pretty(&output_note).unwrap());
-                    let _ = relay_clone.lock().await.send_note(output_note).await;
+                        CodeLanguage::identify_and_execute(&signed_note, node_key_pair.unwrap())
+                            .await;
+                    let _ = relay_clone.send_note(output_note).await.map_err(|_| {
+                        HandlerErrors::RelayError("Could not send note to relay".to_string())
+                    });
+                    info!("Node sent output note");
                 });
             }
             RelayEvents::OK(_event, id, success, _msg) => {
@@ -155,21 +75,122 @@ async fn code_notes_handler() -> Result<(), HandlerErrors> {
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<(), String> {
-    tracing_subscriber::fmt::init();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrakis_node::utils::{create_python_code_note, create_rust_code_note};
 
-    let code_handler = tokio::spawn(async move {
-        if let Err(e) = code_notes_handler().await {
-            error!("Code notes handler error: {}", e);
+    async fn send_rust_code_notes() -> Result<(), HandlerErrors> {
+        let relay = NostrRelay::new(DEFAULT_RELAY_URL)
+            .await
+            .map_err(|_| HandlerErrors::RelayError("Could not create relay".to_string()))?;
+
+        let output_filter = json!({
+            "kinds":[301],
+            "since": unix_stamp_utc_now()- 1,
+        });
+
+        relay
+            .subscribe(output_filter)
+            .await
+            .map_err(|_| HandlerErrors::RelayError("Could not subscribe to relay".to_string()))?;
+
+        let mut message_count = 0;
+
+        while let Some(Ok(message)) = relay.read_from_relay().await {
+            match message {
+                RelayEvents::EVENT(_event, _id, _signed_note) => {
+                    message_count += 1;
+                    if message_count == 10 {
+                        return Ok(());
+                    } else {
+                        let signed_code_note = create_rust_code_note(message_count);
+                        relay.send_note(signed_code_note).await.map_err(|_| {
+                            HandlerErrors::RelayError("Could not send note to relay".to_string())
+                        })?;
+                    }
+                }
+                RelayEvents::OK(_, _, _, _) => {}
+                RelayEvents::NOTICE(_, _) => {}
+                RelayEvents::EOSE(_, _) => {
+                    let signed_code_note = create_rust_code_note(0);
+                    relay.send_note(signed_code_note).await.map_err(|_| {
+                        HandlerErrors::RelayError("Could not send note to relay".to_string())
+                    })?;
+                }
+            }
         }
-    });
+        Ok(())
+    }
 
-    let code_cells = tokio::spawn(async move {
-        create_code_cells().await;
-    });
+    async fn send_python_notes() -> Result<(), HandlerErrors> {
+        let relay = NostrRelay::new(DEFAULT_RELAY_URL)
+            .await
+            .map_err(|_| HandlerErrors::RelayError("Could not create relay".to_string()))?;
 
-    let _ = code_handler.await;
-    let _ = code_cells.await;
-    Ok(())
+        let output_filter = json!({
+            "kinds":[301],
+            "since": unix_stamp_utc_now()- 1,
+        });
+
+        relay
+            .subscribe(output_filter)
+            .await
+            .map_err(|_| HandlerErrors::RelayError("Could not subscribe to relay".to_string()))?;
+
+        let mut message_count = 0;
+
+        while let Some(Ok(message)) = relay.read_from_relay().await {
+            match message {
+                RelayEvents::EVENT(_event, _id, _signed_note) => {
+                    message_count += 1;
+                    if message_count == 10 {
+                        return Ok(());
+                    } else {
+                        let signed_code_note = create_python_code_note(message_count);
+                        relay.send_note(signed_code_note).await.map_err(|_| {
+                            HandlerErrors::RelayError("Could not send note to relay".to_string())
+                        })?;
+                    }
+                }
+                RelayEvents::OK(_, _, _, _) => {}
+                RelayEvents::NOTICE(_, _) => {}
+                RelayEvents::EOSE(_, _) => {
+                    let signed_code_note = create_python_code_note(0);
+                    relay.send_note(signed_code_note).await.map_err(|_| {
+                        HandlerErrors::RelayError("Could not send note to relay".to_string())
+                    })?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_sending_notes() {
+        let relay_task = tokio::spawn(async move {
+            let relay = env::var("RELAY").unwrap_or(DEFAULT_RELAY_URL.to_string());
+            if let Err(e) = relay_connection(&relay).await {
+                panic!("Relay connection failed: {}", e);
+            }
+        });
+
+        let mut sender_tasks = tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+            let rust_task = tokio::spawn(send_rust_code_notes());
+            let python_task = tokio::spawn(send_python_notes());
+            let _ = tokio::join!(rust_task, python_task);
+        });
+
+        let sender_result = tokio::select! {
+            _ = relay_task => None,
+            result = &mut sender_tasks => Some(result),
+        };
+
+        match sender_result {
+            Some(Ok(_)) => assert!(true, "Sender tasks completed successfully"),
+            Some(Err(e)) => assert!(false, "Sender tasks failed: {:?}", e),
+            None => assert!(false, "Relay task finished unexpectedly"),
+        }
+    }
 }

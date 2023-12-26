@@ -40,3 +40,30 @@ impl LocalKeyManagerOpenssl {
         self.keypair.sign_nostr_event(note)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_key_manager_creation() {
+        let key_manager = LocalKeyManagerOpenssl::new_from_pem("node_key.pem".to_string()).unwrap();
+        let public_key = key_manager.get_public_key();
+        assert_eq!(public_key.len(), 64);
+
+    }
+
+    #[test]
+    fn test_key_manager_signing() {
+        let key_manager = LocalKeyManagerOpenssl::new_from_pem("node_key.pem".to_string()).unwrap();
+        let note = Note::new(
+            key_manager.get_public_key(),
+            100,
+            "test"
+        );
+        let signed_note = key_manager.sign_nostr_event(note);
+        assert_eq!(signed_note.verify_signature(), true);
+        assert_eq!(signed_note.verify_content(), true);
+    }
+
+}

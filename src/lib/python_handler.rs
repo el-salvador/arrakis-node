@@ -77,10 +77,6 @@ impl CodeNote for PythonCodeNote {
     where
         Self: Sized,
     {
-        if signed_note.verify_signature() == false || signed_note.verify_content() == false {
-            return Err("Verification failed".to_string());
-        }
-
         let code = signed_note.get_content().to_string();
         let user = signed_note.get_pubkey().to_string();
         let input_note = signed_note.get_id().to_string();
@@ -114,5 +110,55 @@ impl CodeNote for PythonCodeNote {
         note.tag_note("a", self.input_note.as_str());
         let signed_note = key_manager.sign_nostr_event(note);
         signed_note
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_create_handler_from_note() {
+        let key_manager = crate::local_key_handler::LocalKeyManagerOpenssl::new_from_pem(
+            "node_key.pem".to_string(),
+        )
+        .unwrap();
+        let mut note = nostro2::notes::Note::new(
+            key_manager.get_public_key(),
+            100,
+            "print(\"Hello, world!\")",
+        );
+        note.tag_note(
+            "l",
+            "python",
+        );
+        let signed_note = key_manager.sign_nostr_event(note);
+        let handler = PythonCodeNote::from_signed_note(&signed_note).unwrap();
+        assert_eq!(handler.code, "print(\"Hello, world!\")");
+        assert_eq!(handler.user, key_manager.get_public_key());
+    }
+
+    #[tokio::test]
+    async fn text_execution() {
+        let key_manager = crate::local_key_handler::LocalKeyManagerOpenssl::new_from_pem(
+            "node_key.pem".to_string(),
+        )
+        .unwrap();
+        let mut note = nostro2::notes::Note::new(
+            key_manager.get_public_key(),
+            100,
+            "print(\"Hello, world!\")",
+        );
+        note.tag_note(
+            "l",
+            "python",
+        );
+        let signed_note = key_manager.sign_nostr_event(note);
+        let handler = PythonCodeNote::from_signed_note(&signed_note).unwrap();
+        let output_note = handler.run().await.create_output_note(key_manager);
+        assert_eq!(output_note.verify_signature(), true);
+        assert_eq!(output_note.verify_content(), true);
+        assert_eq!(output_note.get_content(), "Hello, world!\n");
+
     }
 }
